@@ -1,2 +1,2 @@
 # flight_transponder
-Info detector of flight transponders data, use tool: dump1090-mutability (SDR used: RTL-SDR V4)   
+Info detector of flight transponders data, used tool: dump1090-mutability (SDR used: RTL-SDR V4)   
