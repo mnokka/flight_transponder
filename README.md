@@ -1,10 +1,26 @@
 # flight_transponder
-Info detector of flight transponders data, used tool: dump1090-mutability (SDR used: RTL-SDR V4)   
+Info detector of airplanes transponders data
+
+## Used tools
+
+1) Linux SW reader tool: dump1090-mutability
+
+2) SDR USB dongle: RTL-SDR V4 (with 1.5m dipole and long wire attached, indoors). Range 50km(ish)   
 
 
-Install (linux version) of needed analyze tool: ```sudo apt-get install dump1090-mutability```
+Install (linux version) of needed transponder readertool: ```sudo apt-get install dump1090-mutability```
 
-Reuired Python lib:
-pip install openpyl
 
-```python3 track_flight_data.py | tee /dev/tty & ``
+## SW 
+
+**test.py:** Simulates incoming transponder info (into a JSON file)
+* new planes added, data updated, old planes removed
+
+**test_flight_data.py:** Dashboard UI, shows info of bypassing plane transponder data and expanded data using public excel data
+
+
+## USAGE
+
+JSON_FILE definition (in the code) defines real or simulated usage.
+
+```python3 track_flight_data.py``

@@ -4,14 +4,17 @@ from datetime import datetime, timedelta
 import json, os, time
 import csv
 
-# --------------------- VALITSE JSON ---------------------
+# --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
-#testing
+
+# use with test.py testing sw
 #JSON_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
-#real
+
+# use for real operations
 JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
+
 EXCEL_FILE = "./aircraftDatabase.csv"
-REMOVE_TIMEOUT = 180
+REMOVE_TIMEOUT = 180  # 3 minuuttia sekunteina
 HEARTBEAT_INTERVAL = 5
 
 planes_dict = {}
@@ -83,16 +86,19 @@ while time.time() - initial_start < 6:
             print(line.strip())
 
 # ---------------- DASHBOARD ALKU ----------------
-clear_screen()
-print("="*180)
-print(f"FLIGHT TRANSPONDER – RIKASTETTU NÄKYMÄ    {datetime.now()}")
-print(f"Running time: 0:00:00")
-print("="*180)
-print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
-      f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
-      f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
-      f"{'Status':>9} {'Removed':>9}")
-print("-"*180)
+def print_dashboard_header():
+    clear_screen()
+    print("="*180)
+    print(f"FLIGHT TRANSPONDER – RIKASTETTU NÄKYMÄ    {datetime.now()}")
+    print(f"Running time: {format_runtime(time.time() - start_time)}")
+    print("="*180)
+    print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
+          f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
+          f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
+          f"{'Status':>9} {'Removed':>9}")
+    print("-"*180)
+
+print_dashboard_header()
 print("Odottamassa koneita JSONista...")
 print("="*180)
 time.sleep(1)
@@ -103,7 +109,6 @@ try:
     while True:
         now = time.time()
         seen_this_round = set()
-        runtime_str = format_runtime(now - start_time)
 
         # Lue JSON
         planes = []
@@ -118,15 +123,10 @@ try:
         # Päivitä koneet
         for p in planes:
             raw_icao = p.get("hex","?")
-            # ---------------- NORMALISOI ICAO DESIMAALIKSI ----------------
-            if isinstance(raw_icao, str):
-                try:
-                    icao_decimal = int(raw_icao, 16)
-                except ValueError:
-                    continue
-            elif isinstance(raw_icao, int):
-                icao_decimal = raw_icao
-            else:
+            # Muutetaan desimaaliksi
+            try:
+                icao_decimal = int(str(raw_icao), 16)
+            except (ValueError, TypeError):
                 continue
 
             # Hae metadata sanakirjasta
@@ -136,7 +136,7 @@ try:
             state = get_state(p)
             seen_this_round.add(icao_decimal)
 
-            # Uusi tai vanha
+            # Uusi tai vanha kone
             if icao_decimal not in planes_dict:
                 planes_dict[icao_decimal] = {
                     "flight": flight,
@@ -148,7 +148,6 @@ try:
                     "registration": meta["registration"],
                     "type": meta["typecode"],
                     "operator": meta["operator"],
-                    # Uudet 4 kenttää
                     "vertical": p.get("vertical_rate","??"),
                     "squawk": p.get("squawk","??"),
                     "alert": p.get("alert","??"),
@@ -166,7 +165,7 @@ try:
                     planes_dict[icao_decimal]["status"] = "ACTIVE"
                     planes_dict[icao_decimal]["removed_time"] = None
 
-        # Tarkista poistuneet
+        # Tarkista poistuneet yli REMOVE_TIMEOUT sekuntia
         for icao, pdata in planes_dict.items():
             if pdata["status"] == "ACTIVE" and icao not in seen_this_round:
                 if now - pdata["last_seen"] > REMOVE_TIMEOUT:
@@ -174,17 +173,7 @@ try:
                     pdata["removed_time"] = datetime.now().strftime("%H:%M:%S")
 
         # Dashboard tulostus
-        clear_screen()
-        print("="*180)
-        print(f"FLIGHT TRANSPONDER – RIKASTETTU NÄKYMÄ    {datetime.now()}")
-        print(f"Running time: {runtime_str}")
-        print("="*180)
-        print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
-              f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
-              f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
-              f"{'Status':>9} {'Removed':>9}")
-        print("-"*180)
-
+        print_dashboard_header()
         if not planes_dict:
             if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                 print("Ei havaintoja JSONista – ohjelma toimii.")
