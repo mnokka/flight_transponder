@@ -1,89 +1,79 @@
 #!/usr/bin/env python3
-##########################################################################################
-#
-# Päivitetty versio: robustimpi vertailu pienille muutoksille
-#
-##########################################################################################
-
 from datetime import datetime
-import sys, subprocess, time, os, json, shutil
+import json, os, time
 
-heartbeat_interval = 5  # seconds
+JSON_FILE = "./json_data/aircraft_backup.json"
+REMOVE_TIMEOUT = 180  # sekuntia, 3 minuuttia
+HEARTBEAT_INTERVAL = 5
 
-timestamp = datetime.now().strftime("%d.%m.%Y-%H.%M.%S")
-
-JSON_DIR = "./json_data"
-LOG_DIR = "./logs"
-log_file = f"{LOG_DIR}/transponder_log_{timestamp}.txt"
-
-AIRCRAFT_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
-
-os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(JSON_DIR, exist_ok=True)
-
-print("Used log file:", log_file)
-
-# ==================== JSON-luku ja heartbeat ===================
-seen = {}
+planes_dict = {}  # icao -> {flight, state, last_seen, status, removed_time}
 last_heartbeat = time.time()
 
-def has_changed(old, new, tol=1e-4):
-    """Tarkista onko tupleissa merkittäviä muutoksia"""
-    for o, n in zip(old, new):
-        if isinstance(o, float) and abs(o - n) > tol:
-            return True
-        if isinstance(o, int) and o != n:
-            return True
-    return False
-
-print("JSON reading starts!!!!")
+def get_state(p):
+    """Yksi tuple kaikista muuttuvista arvoista"""
+    return (
+        round(p.get("altitude",0),0),
+        round(p.get("speed",0),0),
+        round(p.get("track",0),0),
+        round(p.get("lat",5),5),
+        round(p.get("lon",5),5),
+        round(p.get("rssi",0.0),1)
+    )
 
 try:
     while True:
-        if os.path.exists(AIRCRAFT_FILE):
+        now = time.time()
+
+        # Lue JSON
+        if os.path.exists(JSON_FILE):
             try:
-                with open(AIRCRAFT_FILE, "r") as f:
+                with open(JSON_FILE,"r") as f:
                     data = json.load(f)
-                planes = data.get("aircraft", [])
+                planes = data.get("aircraft",[])
             except json.JSONDecodeError:
                 planes = []
-                print("DEBUG: JSON decode error, retrying...")
                 time.sleep(0.1)
                 continue
         else:
             planes = []
 
-        now = time.time()
+        # Päivitä aktiiviset koneet
+        for p in planes:
+            icao = p.get("hex","?")
+            flight = p.get("flight","?")
+            state = get_state(p)
+            planes_dict[icao] = {
+                "flight": flight,
+                "state": state,
+                "last_seen": now,
+                "status": "ACTIVE",
+                "removed_time": None
+            }
 
-        if not planes and now - last_heartbeat >= heartbeat_interval:
+        # Tarkista timeout / poistuneet
+        for icao, p in planes_dict.items():
+            if p["status"] == "ACTIVE" and now - p["last_seen"] > REMOVE_TIMEOUT:
+                p["status"] = "REMOVED"
+                p["removed_time"] = datetime.now().strftime("%H:%M:%S")
+
+        # Heartbeat
+        if not planes_dict and now - last_heartbeat >= HEARTBEAT_INTERVAL:
             print(f"{datetime.now()} Ohjelma toimii, ei havaintoja")
             last_heartbeat = now
 
-        for p in planes:
-            icao = p.get("hex", "?")
-            flight = p.get("flight", "?")
-            # Pyöristetään float-arvot vertailua varten
-            current_state = (
-                round(p.get("altitude", 0), 0),
-                round(p.get("speed", 0), 0),
-                round(p.get("track", 0), 0),
-                round(p.get("lat", 5), 5),
-                round(p.get("lon", 5), 5),
-                round(p.get("rssi", 0.0), 1),
-            )
-
-            if icao not in seen:
-                seen[icao] = current_state
-                print(f"{datetime.now()} NEW PLANE: ICAO={icao} Flight={flight} "
-                      f"Alt={current_state[0]}ft Speed={current_state[1]}kn "
-                      f"Hdg={current_state[2]}° Lat={current_state[3]} Lon={current_state[4]} "
-                      f"RSSI={current_state[5]}")
-            elif has_changed(seen[icao], current_state):
-                seen[icao] = current_state
-                print(f"{datetime.now()} UPDATED: ICAO={icao} Flight={flight} "
-                      f"Alt={current_state[0]}ft Speed={current_state[1]}kn "
-                      f"Hdg={current_state[2]}° Lat={current_state[3]} Lon={current_state[4]} "
-                      f"RSSI={current_state[5]}")
+        # Tulosta snapshot-taulukko
+        if planes_dict:
+            print("\n" + "="*100)
+            print(f"{datetime.now()} KOKO PÄIVÄN SNAPSHOT")
+            print("-"*100)
+            print(f"{'ICAO':<8} {'Flight':<6} {'Alt':>6} {'Spd':>4} {'Hdg':>3} "
+                  f"{'Lat':>8} {'Lon':>8} {'RSSI':>6} {'Status':>8} {'Removed At':>10}")
+            for icao, p in planes_dict.items():
+                s = p["state"]
+                removed_time = p["removed_time"] if p["removed_time"] else "-"
+                print(f"{icao:<8} {p['flight']:<6} {s[0]:>6} {s[1]:>4} {s[2]:>3} "
+                      f"{s[3]:>8} {s[4]:>8} {s[5]:>6} {p['status']:>8} {removed_time:>10}")
+            print("="*100 + "\n")
 
         time.sleep(1)
 
