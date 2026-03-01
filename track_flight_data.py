@@ -165,7 +165,8 @@ try:
                     planes_dict[icao_decimal]["status"] = "ACTIVE"
                     planes_dict[icao_decimal]["removed_time"] = None
 
-        # Tarkista poistuneet yli REMOVE_TIMEOUT sekuntia
+        # ---------------- POISTETAAN HILJAISUUDEN JÄLKEEN ----------------
+        now = time.time()
         for icao, pdata in planes_dict.items():
             if pdata["status"] == "ACTIVE" and icao not in seen_this_round:
                 if now - pdata["last_seen"] > REMOVE_TIMEOUT:
@@ -196,4 +197,4 @@ except KeyboardInterrupt:
     clear_screen()
     print("\nLopetetaan ohjelma...")
     proc.terminate()
-    proc.wait()
+    #proc.wait()
