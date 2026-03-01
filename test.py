@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 import json
 import time
-from datetime import datetime
 import random
 import os
+from datetime import datetime
 
+# --- Asetukset ---
 JSON_DIR = './json_data'
 os.makedirs(JSON_DIR, exist_ok=True)
 
-JSON_FILE = os.path.join(JSON_DIR, 'aircraft_backup.json')
-TMP_FILE  = os.path.join(JSON_DIR, 'aircraft_backup.tmp')
+BACKUP_FILE = os.path.join(JSON_DIR, 'aircraft_backup.json')
+TMP_FILE    = os.path.join(JSON_DIR, 'aircraft_backup.tmp')
 
-PLANE_TTL = 60      # sekuntia, jonka jälkeen kone katoaa
-ADD_INTERVAL = 30  # uusi kone 30 s välein
+PLANE_TTL   = 60        # sekuntia vanhentumiseen
+ADD_PROB    = 0.3       # todennäköisyys lisätä uusi kone per sekunti
+REMOVE_PROB = 0.1       # todennäköisyys poistaa kone per sekunti
 
 planes = []
 next_plane_id = 1
-last_add_time = 0
+planes_seen = {}  # ICAO -> viimeisin tila (alt, speed, track, lat, lon, rssi)
 
+# --- Funktio uuden koneen luomiseen ---
 def create_plane(pid):
     return {
         "hex": f"TEST{pid:03d}",
@@ -31,7 +34,7 @@ def create_plane(pid):
         "last_seen": time.time()
     }
 
-# lisää heti aloituskoneet
+# --- Alkuun pari konetta ---
 for _ in range(2):
     planes.append(create_plane(next_plane_id))
     next_plane_id += 1
@@ -39,15 +42,14 @@ for _ in range(2):
 while True:
     now = time.time()
 
-    # ---- lisää uusi kone ----
-    if now - last_add_time >= ADD_INTERVAL:
+    # --- Satunnainen uusi kone ---
+    if random.random() < ADD_PROB:
         p = create_plane(next_plane_id)
         planes.append(p)
         print(f"{datetime.now()} Lisätty kone {p['flight']}")
         next_plane_id += 1
-        last_add_time = now
 
-    # ---- päivitä koneet ----
+    # --- Päivitä olemassa olevien koneiden tiedot ---
     for p in planes:
         p["lat"] += random.uniform(-0.001, 0.001)
         p["lon"] += random.uniform(-0.001, 0.001)
@@ -57,24 +59,50 @@ while True:
         p["rssi"] += random.uniform(-0.5, 0.5)
         p["last_seen"] = now
 
-    # ---- poista vanhat ----
-    before = len(planes)
-    planes = [p for p in planes if now - p["last_seen"] < PLANE_TTL]
-    removed = before - len(planes)
-
+    # --- Satunnainen poisto ---
+    planes_before = len(planes)
+    planes = [p for p in planes if random.random() > REMOVE_PROB]
+    removed = planes_before - len(planes)
     if removed:
-        print(f"{datetime.now()} Poistettu {removed} vanhaa konetta")
+        print(f"{datetime.now()} Poistettu {removed} satunnaista konetta")
 
-    # ---- kirjoita JSON atomisesti ----
-    data = {
+    # --- TTL:n ylittäneiden poisto ---
+    planes_before = len(planes)
+    planes = [p for p in planes if now - p["last_seen"] < PLANE_TTL]
+    removed_ttl = planes_before - len(planes)
+    if removed_ttl:
+        print(f"{datetime.now()} Poistettu {removed_ttl} vanhaa konetta TTL:n vuoksi")
+
+    # --- Tulosta uudet ja päivittyneet koneet ---
+    for p in planes:
+        icao = p["hex"]
+        flight = p["flight"]
+        current_state = (
+            p["altitude"], p["speed"], p["track"],
+            p["lat"], p["lon"], p["rssi"]
+        )
+
+        if icao not in planes_seen:
+            planes_seen[icao] = current_state
+            print(f"{datetime.now()} NEW PLANE: ICAO={icao} Flight={flight} "
+                  f"Alt={current_state[0]}ft Speed={current_state[1]}kn "
+                  f"Hdg={current_state[2]}° Lat={current_state[3]} Lon={current_state[4]} "
+                  f"RSSI={current_state[5]}")
+        elif planes_seen[icao] != current_state:
+            planes_seen[icao] = current_state
+            print(f"{datetime.now()} UPDATED: ICAO={icao} Flight={flight} "
+                  f"Alt={current_state[0]}ft Speed={current_state[1]}kn "
+                  f"Hdg={current_state[2]}° Lat={current_state[3]} Lon={current_state[4]} "
+                  f"RSSI={current_state[5]}")
+
+    # --- Kirjoita atomisesti backup-tiedostoon ---
+    out_data = {
         "now": now,
         "messages": len(planes),
         "aircraft": planes
     }
-
     with open(TMP_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-    os.replace(TMP_FILE, JSON_FILE)
+        json.dump(out_data, f, indent=2)
+    os.replace(TMP_FILE, BACKUP_FILE)
 
     time.sleep(1)
