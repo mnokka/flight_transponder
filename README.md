@@ -16,11 +16,16 @@ Install (linux version) of needed transponder readertool: ```sudo apt-get instal
 **test.py:** Simulates incoming transponder info (into a JSON file)
 * new planes added, data updated, old planes removed
 
-**test_flight_data.py:** Dashboard UI, shows info of bypassing plane transponder data and expanded data using public excel data
+**test_flight_data.py:**  The Dashboard UI. Shows info of bypassing plane transponder data and expanded data using public excel data (zip attached)
 
 
 ## USAGE
 
 JSON_FILE definition (in the code) defines real or simulated usage.
 
-```python3 track_flight_data.py``
+```python3 track_flight_data.py```
+
+
+
+
+![Dashboard](real2planes.png)
