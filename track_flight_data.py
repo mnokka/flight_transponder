@@ -6,22 +6,19 @@ import csv
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
-
-# use with test.py testing sw
-#JSON_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
-
-# use for real operations
+#live usage
 JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
-
+#test usage
+#JSON_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
 EXCEL_FILE = "./aircraftDatabase.csv"
-REMOVE_TIMEOUT = 180  # 3 minuuttia sekunteina
+REMOVE_TIMEOUT = 180  # 3 minuuttia
 HEARTBEAT_INTERVAL = 5
 
 planes_dict = {}
 aircraft_db = {}
 start_time = time.time()
 
-# ---------------- LUE CSV (ICAO METADATA) ----------------
+# ---------------- LUE CSV ----------------
 def load_aircraft_database():
     global aircraft_db
     if not os.path.exists(EXCEL_FILE):
@@ -34,12 +31,10 @@ def load_aircraft_database():
             raw_icao = row.get("icao24")
             if not raw_icao:
                 continue
-            # Muutetaan heksa → desimaali
             try:
                 icao_decimal = int(str(raw_icao).strip().lower().replace("0x",""), 16)
             except ValueError:
                 continue
-
             aircraft_db[icao_decimal] = {
                 "registration": (row.get("registration") or "??").strip(),
                 "typecode": (row.get("typecode") or "??").strip(),
@@ -47,15 +42,18 @@ def load_aircraft_database():
             }
 
 # ---------------- HELPER ----------------
-def get_state(p):
+def extract_state(p):
     return (
         round(p.get("altitude", 0), 0),
         round(p.get("speed", 0), 0),
         round(p.get("track", 0), 0),
-        round(p.get("lat", 5), 5),
-        round(p.get("lon", 5), 5),
+        round(p.get("lat", 0.0), 5),
+        round(p.get("lon", 0.0), 5),
         round(p.get("rssi", 0.0), 1)
     )
+
+def state_changed(old, new):
+    return old != new
 
 def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
@@ -64,10 +62,9 @@ def format_runtime(seconds):
     td = timedelta(seconds=int(seconds))
     return str(td)
 
-# ---------------- LADATAAN CSV ----------------
+# ---------------- START ----------------
 load_aircraft_database()
 
-# ---------------- KÄYNNISTETÄÄN DUMP1090 ----------------
 print("Käynnistetään dump1090...")
 proc = subprocess.Popen(
     ["dump1090-mutability", "--net", "--write-json", JSON_DIR],
@@ -76,7 +73,6 @@ proc = subprocess.Popen(
     text=True
 )
 
-# ---------------- LUE ALKURAPORTIT 6 SEKUNTIA ----------------
 print("\nLuen tikun alkuraportteja 6 sekuntia...")
 initial_start = time.time()
 while time.time() - initial_start < 6:
@@ -85,7 +81,6 @@ while time.time() - initial_start < 6:
         if line:
             print(line.strip())
 
-# ---------------- DASHBOARD ALKU ----------------
 def print_dashboard_header():
     clear_screen()
     print("="*180)
@@ -105,12 +100,11 @@ time.sleep(1)
 
 # ---------------- PÄÄSILMUKKA ----------------
 last_heartbeat = time.time()
+
 try:
     while True:
         now = time.time()
-        seen_this_round = set()
 
-        # Lue JSON
         planes = []
         if os.path.exists(JSON_FILE):
             try:
@@ -120,23 +114,25 @@ try:
             except json.JSONDecodeError:
                 planes = []
 
-        # Päivitä koneet
+        # ---- Päivitä koneet ----
         for p in planes:
-            raw_icao = p.get("hex","?")
-            # Muutetaan desimaaliksi
+            raw_icao = p.get("hex")
+            if not raw_icao:
+                continue
+
             try:
                 icao_decimal = int(str(raw_icao), 16)
             except (ValueError, TypeError):
                 continue
 
-            # Hae metadata sanakirjasta
-            meta = aircraft_db.get(icao_decimal, {"registration":"??","typecode":"??","operator":"??"})
+            meta = aircraft_db.get(
+                icao_decimal,
+                {"registration":"??","typecode":"??","operator":"??"}
+            )
 
-            flight = p.get("flight","?")
-            state = get_state(p)
-            seen_this_round.add(icao_decimal)
+            flight = p.get("flight", "?")
+            state = extract_state(p)
 
-            # Uusi tai vanha kone
             if icao_decimal not in planes_dict:
                 planes_dict[icao_decimal] = {
                     "flight": flight,
@@ -154,27 +150,32 @@ try:
                     "on_ground": p.get("on_ground","??")
                 }
             else:
+                # 🔥 TÄRKEÄ MUUTOS:
+                # päivitä last_seen VAIN jos state muuttui
+                if state_changed(planes_dict[icao_decimal]["state"], state):
+                    planes_dict[icao_decimal]["state"] = state
+                    planes_dict[icao_decimal]["last_seen"] = now
+
                 planes_dict[icao_decimal]["flight"] = flight
-                planes_dict[icao_decimal]["state"] = state
-                planes_dict[icao_decimal]["last_seen"] = now
                 planes_dict[icao_decimal]["vertical"] = p.get("vertical_rate","??")
                 planes_dict[icao_decimal]["squawk"] = p.get("squawk","??")
                 planes_dict[icao_decimal]["alert"] = p.get("alert","??")
                 planes_dict[icao_decimal]["on_ground"] = p.get("on_ground","??")
+
                 if planes_dict[icao_decimal]["status"] == "REMOVED":
                     planes_dict[icao_decimal]["status"] = "ACTIVE"
                     planes_dict[icao_decimal]["removed_time"] = None
 
-        # ---------------- POISTETAAN HILJAISUUDEN JÄLKEEN ----------------
-        now = time.time()
+        # ---- Hiljaisuustarkistus ----
         for icao, pdata in planes_dict.items():
-            if pdata["status"] == "ACTIVE" and icao not in seen_this_round:
+            if pdata["status"] == "ACTIVE":
                 if now - pdata["last_seen"] > REMOVE_TIMEOUT:
                     pdata["status"] = "REMOVED"
                     pdata["removed_time"] = datetime.now().strftime("%H:%M:%S")
 
-        # Dashboard tulostus
+        # ---- Tulostus ----
         print_dashboard_header()
+
         if not planes_dict:
             if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                 print("Ei havaintoja JSONista – ohjelma toimii.")
@@ -183,9 +184,11 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-                print(f"{icao:<8} {pdata['registration']:<10} {pdata['type']:<6} {pdata['operator']:<20} "
-                      f"{pdata['flight']:<8} {s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
-                      f"{pdata['vertical']:>8} {pdata['squawk']:>6} {str(pdata['alert']):>5} {str(pdata['on_ground']):>5} "
+                print(f"{icao:06X} {pdata['registration']:<10} {pdata['type']:<6} "
+                      f"{pdata['operator']:<20} {pdata['flight']:<8} "
+                      f"{s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
+                      f"{pdata['vertical']:>8} {pdata['squawk']:>6} "
+                      f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>5} "
                       f"{pdata['status']:>9} {removed_time:>9}")
 
             print("="*180)
