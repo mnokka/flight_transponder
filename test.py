@@ -13,8 +13,8 @@ BACKUP_FILE = os.path.join(JSON_DIR, 'aircraft_backup.json')
 TMP_FILE    = os.path.join(JSON_DIR, 'aircraft_backup.tmp')
 
 PLANE_TTL   = 60        # sekuntia vanhentumiseen
-ADD_PROB    = 0.3       # todennäköisyys lisätä uusi kone per sekunti
-REMOVE_PROB = 0.1       # todennäköisyys poistaa kone per sekunti
+ADD_PROB    = 0.1       # todennäköisyys lisätä uusi kone per sekunti
+REMOVE_PROB = 0.3       # todennäköisyys poistaa kone per sekunti
 
 planes = []
 next_plane_id = 1
