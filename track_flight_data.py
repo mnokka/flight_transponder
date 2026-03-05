@@ -6,12 +6,9 @@ import csv
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
-#live usage
 JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
-#test usage
-#JSON_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
 EXCEL_FILE = "./aircraftDatabase.csv"
-REMOVE_TIMEOUT = 180  # 3 minuuttia
+REMOVE_TIMEOUT = 180
 HEARTBEAT_INTERVAL = 5
 
 planes_dict = {}
@@ -83,19 +80,22 @@ while time.time() - initial_start < 6:
 
 def print_dashboard_header():
     clear_screen()
-    print("="*180)
+    print("="*210)
     print(f"FLIGHT TRANSPONDER – RIKASTETTU NÄKYMÄ    {datetime.now()}")
     print(f"Running time: {format_runtime(time.time() - start_time)}")
-    print("="*180)
+    print("="*210)
+
     print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
           f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
+          f"{'Msgs':>6} {'Msg/s':>6} {'First':>8} "  # ADDED
           f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
           f"{'Status':>9} {'Removed':>9}")
-    print("-"*180)
+
+    print("-"*210)
 
 print_dashboard_header()
 print("Odottamassa koneita JSONista...")
-print("="*180)
+print("="*210)
 time.sleep(1)
 
 # ---------------- PÄÄSILMUKKA ----------------
@@ -133,7 +133,10 @@ try:
             flight = p.get("flight", "?")
             state = extract_state(p)
 
+            messages = p.get("messages", 0)  # ADDED
+
             if icao_decimal not in planes_dict:
+
                 planes_dict[icao_decimal] = {
                     "flight": flight,
                     "state": state,
@@ -147,24 +150,38 @@ try:
                     "vertical": p.get("vertical_rate","??"),
                     "squawk": p.get("squawk","??"),
                     "alert": p.get("alert","??"),
-                    "on_ground": p.get("on_ground","??")
+                    "on_ground": p.get("on_ground","??"),
+                    "messages": messages,
+                    "prev_messages": messages,     # ADDED
+                    "msg_rate": 0                  # ADDED
                 }
+
             else:
-                # 🔥 TÄRKEÄ MUUTOS:
-                # päivitä last_seen VAIN jos state muuttui
-                if state_changed(planes_dict[icao_decimal]["state"], state):
-                    planes_dict[icao_decimal]["state"] = state
-                    planes_dict[icao_decimal]["last_seen"] = now
 
-                planes_dict[icao_decimal]["flight"] = flight
-                planes_dict[icao_decimal]["vertical"] = p.get("vertical_rate","??")
-                planes_dict[icao_decimal]["squawk"] = p.get("squawk","??")
-                planes_dict[icao_decimal]["alert"] = p.get("alert","??")
-                planes_dict[icao_decimal]["on_ground"] = p.get("on_ground","??")
+                pdata = planes_dict[icao_decimal]
 
-                if planes_dict[icao_decimal]["status"] == "REMOVED":
-                    planes_dict[icao_decimal]["status"] = "ACTIVE"
-                    planes_dict[icao_decimal]["removed_time"] = None
+                # ---- Msg/s laskenta ----  ADDED
+                msg_delta = messages - pdata["prev_messages"]
+                if msg_delta < 0:
+                    msg_delta = 0
+                pdata["msg_rate"] = msg_delta
+                pdata["prev_messages"] = messages
+
+                # ---- state update FIX ----
+                if state_changed(pdata["state"], state):
+                    pdata["state"] = state
+                    pdata["last_seen"] = now
+
+                pdata["flight"] = flight
+                pdata["vertical"] = p.get("vertical_rate","??")
+                pdata["squawk"] = p.get("squawk","??")
+                pdata["alert"] = p.get("alert","??")
+                pdata["on_ground"] = p.get("on_ground","??")
+                pdata["messages"] = messages
+
+                if pdata["status"] == "REMOVED":
+                    pdata["status"] = "ACTIVE"
+                    pdata["removed_time"] = None
 
         # ---- Hiljaisuustarkistus ----
         for icao, pdata in planes_dict.items():
@@ -184,14 +201,18 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
+
                 print(f"{icao:06X} {pdata['registration']:<10} {pdata['type']:<6} "
                       f"{pdata['operator']:<20} {pdata['flight']:<8} "
                       f"{s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
+                      f"{pdata['messages']:>6} "
+                      f"{pdata['msg_rate']:>6} "  # ADDED
+                      f"{pdata['first_seen']:>8} "  # ADDED
                       f"{pdata['vertical']:>8} {pdata['squawk']:>6} "
                       f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>5} "
                       f"{pdata['status']:>9} {removed_time:>9}")
 
-            print("="*180)
+            print("="*210)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
         time.sleep(1)
@@ -200,4 +221,3 @@ except KeyboardInterrupt:
     clear_screen()
     print("\nLopetetaan ohjelma...")
     proc.terminate()
-    #proc.wait()
