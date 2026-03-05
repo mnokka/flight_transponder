@@ -87,7 +87,7 @@ def print_dashboard_header():
 
     print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
           f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
-          f"{'Msgs':>6} {'Msg/s':>6} {'First':>8} "  # ADDED
+          f"{'Msgs':>6} {'Msg/s':>6} {'First':>8} "
           f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
           f"{'Status':>9} {'Removed':>9}")
 
@@ -133,7 +133,7 @@ try:
             flight = p.get("flight", "?")
             state = extract_state(p)
 
-            messages = p.get("messages", 0)  # ADDED
+            messages = p.get("messages", 0)
 
             if icao_decimal not in planes_dict:
 
@@ -152,15 +152,15 @@ try:
                     "alert": p.get("alert","??"),
                     "on_ground": p.get("on_ground","??"),
                     "messages": messages,
-                    "prev_messages": messages,     # ADDED
-                    "msg_rate": 0                  # ADDED
+                    "prev_messages": messages,
+                    "msg_rate": 0
                 }
 
             else:
 
                 pdata = planes_dict[icao_decimal]
 
-                # ---- Msg/s laskenta ----  ADDED
+                # ---- Msg/s laskenta ----
                 msg_delta = messages - pdata["prev_messages"]
                 if msg_delta < 0:
                     msg_delta = 0
@@ -168,9 +168,10 @@ try:
                 pdata["prev_messages"] = messages
 
                 # ---- state update FIX ----
-                if state_changed(pdata["state"], state):
-                    pdata["state"] = state
-                    pdata["last_seen"] = now
+                if pdata["status"] != "REMOVED":   # 🔹 Ei päivitetä REMOVED-tilassa
+                    if state_changed(pdata["state"], state):
+                        pdata["state"] = state
+                        pdata["last_seen"] = now
 
                 pdata["flight"] = flight
                 pdata["vertical"] = p.get("vertical_rate","??")
@@ -206,8 +207,8 @@ try:
                       f"{pdata['operator']:<20} {pdata['flight']:<8} "
                       f"{s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
                       f"{pdata['messages']:>6} "
-                      f"{pdata['msg_rate']:>6} "  # ADDED
-                      f"{pdata['first_seen']:>8} "  # ADDED
+                      f"{pdata['msg_rate']:>6} "
+                      f"{pdata['first_seen']:>8} "
                       f"{pdata['vertical']:>8} {pdata['squawk']:>6} "
                       f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>5} "
                       f"{pdata['status']:>9} {removed_time:>9}")
