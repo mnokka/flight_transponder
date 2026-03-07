@@ -95,12 +95,11 @@ def print_dashboard_header():
     print(f"Running time: {format_runtime(time.time() - start_time)}")
     print("="*210)
 
-    print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
-          f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>6} "
-          f"{'Msgs':>6} {'First':>8} "
-          f"{'VertSpeed':>9} {'Squawk':>6} {'Alert':>5} {'OnG':>4} "
-          f"{'Manufact':<15} {'Callsign':<12} {'Owner':<12} "
-          f"{'Status':>7} {'Removed':>9}")
+# ---------------- Dashboard sarakkeet lyhennetty ----------------
+    print(f"{'ICAO':<8} {'Reg':<8} {'Type':<6} {'Operator':<12} {'Flight':<6} "
+      f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>5} "
+      f"{'Msgs':>5} {'First':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
+      f"{'Manufact':<15} {'Callsign':<10} {'Owner':<10} {'Status':>7} {'Removed':>8}")
     print("-"*210)
 
     # ---------------- Dashboard sarakkeet ----------------
@@ -219,16 +218,15 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-                print(f"{icao:06X} {pdata['registration']:<10} {pdata['type']:<6} "
-                      f"{pdata['operator']:<20} {pdata['flight']:<8} "
-                      f"{s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
-                      f"{pdata['messages']:>6} "
-                      f"{pdata['first_seen']:>8} "
-                      f"{pdata['vertical']:>9} {pdata['squawk']:>6} "
-                      f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>4} "
-                      f"{pdata['manufacturername']:<15} {pdata['operatorcallsign']:<12} {pdata['owner']:<12} "
-                      f"{pdata['status']:>7} {removed_time:>9}")
-            print("="*210)
+                print(f"{icao:06X} {pdata['registration']:<8} {pdata['type']:<6} "
+                f"{pdata['operator'][:12]:<12} {pdata['flight'][:6]:<6} "
+                f"{s[3]:>7} {s[4]:>7} {s[0]:>5} {s[1]:>5} {s[2]:>6} {s[5]:>5} "
+                f"{pdata['messages']:>5} "
+                f"{pdata['first_seen']:>8} {pdata['vertical']:>8} {pdata['squawk']:>6} "
+                f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>3} "
+                f"{pdata['manufacturername']:<15} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} "
+                f"{pdata['status']:>7} {removed_time:>8}")
+                print("="*210)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
         time.sleep(1)
