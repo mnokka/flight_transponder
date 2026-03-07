@@ -36,17 +36,26 @@ def load_aircraft_database():
                 "registration": (row.get("registration") or "??").strip(),
                 "typecode": (row.get("typecode") or "??").strip(),
                 "operator": (row.get("operator") or "??").strip(),
+                "manufacturername": (row.get("manufacturername") or "??").strip(),
+                "operatorcallsign": (row.get("operatorcallsign") or "??").strip(),
+                "owner": (row.get("owner") or "??").strip()
             }
 
 # ---------------- HELPER ----------------
 def extract_state(p):
+    alt = p.get("altitude") or 0
+    spd = p.get("speed") or 0
+    trk = p.get("track") or 0
+    lat = p.get("lat") or 0.0
+    lon = p.get("lon") or 0.0
+    rssi = p.get("rssi") or 0.0
     return (
-        round(p.get("altitude", 0), 0),
-        round(p.get("speed", 0), 0),
-        round(p.get("track", 0), 0),
-        round(p.get("lat", 0.0), 5),
-        round(p.get("lon", 0.0), 5),
-        round(p.get("rssi", 0.0), 1)
+        round(alt, 0),
+        round(spd, 0),
+        round(trk, 0),
+        round(lat, 5),
+        round(lon, 5),
+        round(rssi, 1)
     )
 
 def state_changed(old, new):
@@ -78,6 +87,7 @@ while time.time() - initial_start < 6:
         if line:
             print(line.strip())
 
+# ---------------- DASHBOARD ----------------
 def print_dashboard_header():
     clear_screen()
     print("="*210)
@@ -86,12 +96,36 @@ def print_dashboard_header():
     print("="*210)
 
     print(f"{'ICAO':<8} {'Reg':<10} {'Type':<6} {'Operator':<20} {'Flight':<8} "
-          f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Spd':>5} {'Track':>6} {'RSSI':>6} "
-          f"{'Msgs':>6} {'Msg/s':>6} {'First':>8} "
-          f"{'Vertical':>8} {'Squawk':>6} {'Alert':>5} {'OnGrd':>5} "
-          f"{'Status':>9} {'Removed':>9}")
-
+          f"{'Lat':>8} {'Lon':>8} {'Alt':>6} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>6} "
+          f"{'Msgs':>6} {'First':>8} "
+          f"{'VertSpeed':>9} {'Squawk':>6} {'Alert':>5} {'OnG':>4} "
+          f"{'Manufact':<15} {'Callsign':<12} {'Owner':<12} "
+          f"{'Status':>7} {'Removed':>9}")
     print("-"*210)
+
+    # ---------------- Dashboard sarakkeet ----------------
+    # ICAO       -> Koneen ICAO-tunnus
+    # Reg        -> Rekisteritunnus
+    # Type       -> Lentokoneen tyyppikoodi
+    # Operator   -> Lentoyhtiö tai operaattori
+    # Flight     -> Lentotunnus / flight code
+    # Lat / Lon  -> Sijainti
+    # Alt        -> Korkeus jalassa
+    # Speed      -> Nopeus
+    # TrackAngle -> Kurssi / heading
+    # RSSI       -> Signaalin voimakkuus
+    # Msgs       -> Viestien määrä
+    # First      -> Ensimmäinen havainto
+    # VertSpeed  -> Vertikaalinopeus (nousu/lasku)
+    # Squawk     -> Squawk-koodi
+    # Alert      -> Hälytys / Emergency
+    # OnG        -> Maassa / on ground
+    # Manufact   -> Valmistaja
+    # Callsign   -> Operaattorin kutsumerkki
+    # Owner      -> Omistaja
+    # Status     -> Tilanne ACTIVE / REMOVED
+    # Removed    -> Viimeinen poistettu-aika
+
 
 print_dashboard_header()
 print("Odottamassa koneita JSONista...")
@@ -104,7 +138,6 @@ last_heartbeat = time.time()
 try:
     while True:
         now = time.time()
-
         planes = []
         if os.path.exists(JSON_FILE):
             try:
@@ -119,7 +152,6 @@ try:
             raw_icao = p.get("hex")
             if not raw_icao:
                 continue
-
             try:
                 icao_decimal = int(str(raw_icao), 16)
             except (ValueError, TypeError):
@@ -127,16 +159,15 @@ try:
 
             meta = aircraft_db.get(
                 icao_decimal,
-                {"registration":"??","typecode":"??","operator":"??"}
+                {"registration":"??","typecode":"??","operator":"??",
+                 "manufacturername":"??","operatorcallsign":"??","owner":"??"}
             )
 
             flight = p.get("flight", "?")
             state = extract_state(p)
-
             messages = p.get("messages", 0)
 
             if icao_decimal not in planes_dict:
-
                 planes_dict[icao_decimal] = {
                     "flight": flight,
                     "state": state,
@@ -147,53 +178,39 @@ try:
                     "registration": meta["registration"],
                     "type": meta["typecode"],
                     "operator": meta["operator"],
+                    "manufacturername": meta["manufacturername"],
+                    "operatorcallsign": meta["operatorcallsign"],
+                    "owner": meta["owner"],
                     "vertical": p.get("vertical_rate","??"),
                     "squawk": p.get("squawk","??"),
                     "alert": p.get("alert","??"),
                     "on_ground": p.get("on_ground","??"),
                     "messages": messages,
-                    "prev_messages": messages,
-                    "msg_rate": 0
+                    "prev_messages": messages
                 }
-
             else:
-
                 pdata = planes_dict[icao_decimal]
-
-                # ---- Msg/s laskenta ----
-                msg_delta = messages - pdata["prev_messages"]
-                if msg_delta < 0:
-                    msg_delta = 0
-                pdata["msg_rate"] = msg_delta
                 pdata["prev_messages"] = messages
-
-                # ---- state update FIX ----
-                if pdata["status"] != "REMOVED":   # 🔹 Ei päivitetä REMOVED-tilassa
-                    if state_changed(pdata["state"], state):
-                        pdata["state"] = state
-                        pdata["last_seen"] = now
-
+                pdata["state"] = state
+                pdata["last_seen"] = now
                 pdata["flight"] = flight
                 pdata["vertical"] = p.get("vertical_rate","??")
                 pdata["squawk"] = p.get("squawk","??")
                 pdata["alert"] = p.get("alert","??")
                 pdata["on_ground"] = p.get("on_ground","??")
                 pdata["messages"] = messages
-
                 if pdata["status"] == "REMOVED":
                     pdata["status"] = "ACTIVE"
                     pdata["removed_time"] = None
 
         # ---- Hiljaisuustarkistus ----
         for icao, pdata in planes_dict.items():
-            if pdata["status"] == "ACTIVE":
-                if now - pdata["last_seen"] > REMOVE_TIMEOUT:
-                    pdata["status"] = "REMOVED"
-                    pdata["removed_time"] = datetime.now().strftime("%H:%M:%S")
+            if pdata["status"] == "ACTIVE" and now - pdata["last_seen"] > REMOVE_TIMEOUT:
+                pdata["status"] = "REMOVED"
+                pdata["removed_time"] = datetime.now().strftime("%H:%M:%S")
 
         # ---- Tulostus ----
         print_dashboard_header()
-
         if not planes_dict:
             if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                 print("Ei havaintoja JSONista – ohjelma toimii.")
@@ -202,17 +219,15 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-
                 print(f"{icao:06X} {pdata['registration']:<10} {pdata['type']:<6} "
                       f"{pdata['operator']:<20} {pdata['flight']:<8} "
                       f"{s[3]:>8} {s[4]:>8} {s[0]:>6} {s[1]:>5} {s[2]:>6} {s[5]:>6} "
                       f"{pdata['messages']:>6} "
-                      f"{pdata['msg_rate']:>6} "
                       f"{pdata['first_seen']:>8} "
-                      f"{pdata['vertical']:>8} {pdata['squawk']:>6} "
-                      f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>5} "
-                      f"{pdata['status']:>9} {removed_time:>9}")
-
+                      f"{pdata['vertical']:>9} {pdata['squawk']:>6} "
+                      f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>4} "
+                      f"{pdata['manufacturername']:<15} {pdata['operatorcallsign']:<12} {pdata['owner']:<12} "
+                      f"{pdata['status']:>7} {removed_time:>9}")
             print("="*210)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
