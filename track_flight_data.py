@@ -15,6 +15,15 @@ planes_dict = {}
 aircraft_db = {}
 start_time = time.time()
 
+
+ICALEN=8
+REGLEN=6   
+TYPELEN=4
+OPERATORLEN=8
+FLIGHTLEN=6
+MESSAGESLEN=4
+RSSILEN=5
+
 # ---------------- LUE CSV ----------------
 def load_aircraft_database():
     global aircraft_db
@@ -96,34 +105,34 @@ def print_dashboard_header():
     print("="*210)
 
 # ---------------- Dashboard sarakkeet lyhennetty ----------------
-    print(f"{'ICAO':<8} {'Reg':<8} {'Type':<6} {'Operator':<12} {'Flight':<6} "
-      f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>5} "
-      f"{'Msgs':>5} {'First':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
-      f"{'Manufact':<15} {'Callsign':<10} {'Owner':<10} {'Status':>7} {'Removed':>8}")
+    print(f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} {'Operator':<{OPERATORLEN}} {'Flight':<6} "
+      f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {{RSSILEN}} "
+      f"{'Msgs':>{MESSAGESLEN}} {'FirstSeen':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
+      f"{'Status':>7} {'Removed':>8} {'Callsign':<10} {'Owner':<10} {'Manufact':<15} ")
     print("-"*210)
 
     # ---------------- Dashboard sarakkeet ----------------
-    # ICAO       -> Koneen ICAO-tunnus
-    # Reg        -> Rekisteritunnus
-    # Type       -> Lentokoneen tyyppikoodi
-    # Operator   -> Lentoyhtiö tai operaattori
-    # Flight     -> Lentotunnus / flight code
-    # Lat / Lon  -> Sijainti
-    # Alt        -> Korkeus jalassa
-    # Speed      -> Nopeus
+    # ICAO       -> Koneen ICAO-tunnus 6
+    # Reg        -> Rekisteritunnus 6
+    # Type       -> Lentokoneen tyyppikoodi ?
+    # Operator   -> Lentoyhtiö tai operaattori ?
+    # Flight     -> Lentotunnus / flight code ?
+    # Lat / Lon  -> Sijainti 4 4 
+    # Alt        -> Korkeus jalassa 5
+    # Speed      -> Nopeus ?
     # TrackAngle -> Kurssi / heading
-    # RSSI       -> Signaalin voimakkuus
-    # Msgs       -> Viestien määrä
-    # First      -> Ensimmäinen havainto
+    # RSSI       -> Signaalin voimakkuus 5
+    # Msgs       -> Viestien määrä 3
+    # First      -> Ensimmäinen havainto 8 
     # VertSpeed  -> Vertikaalinopeus (nousu/lasku)
     # Squawk     -> Squawk-koodi
     # Alert      -> Hälytys / Emergency
     # OnG        -> Maassa / on ground
     # Manufact   -> Valmistaja
     # Callsign   -> Operaattorin kutsumerkki
-    # Owner      -> Omistaja
-    # Status     -> Tilanne ACTIVE / REMOVED
-    # Removed    -> Viimeinen poistettu-aika
+    # Owner      -> Omistaja 30
+    # Status     -> Tilanne ACTIVE / REMOVED 7
+    # Removed    -> Viimeinen poistettu-aika 8
 
 
 print_dashboard_header()
@@ -218,14 +227,13 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-                print(f"{icao:06X} {pdata['registration']:<8} {pdata['type']:<6} "
-                f"{pdata['operator'][:12]:<12} {pdata['flight'][:6]:<6} "
+                print(f"{icao:06X} {pdata['registration']:<{REGLEN}} {pdata['type']:<{TYPELEN}} "
+                f"{pdata['operator'][:12]:<{OPERATORLEN}} {pdata['flight'][:6]:<{FLIGHTLEN}} "
                 f"{s[3]:>7} {s[4]:>7} {s[0]:>5} {s[1]:>5} {s[2]:>6} {s[5]:>5} "
-                f"{pdata['messages']:>5} "
+                f"{pdata['messages']:>{MESSAGESLEN}} "
                 f"{pdata['first_seen']:>8} {pdata['vertical']:>8} {pdata['squawk']:>6} "
                 f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>3} "
-                f"{pdata['manufacturername']:<15} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} "
-                f"{pdata['status']:>7} {removed_time:>8}")
+                f"{pdata['status']:>7} {removed_time:>8} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} {pdata['manufacturername']:<15}")
                 print("="*210)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
