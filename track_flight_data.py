@@ -6,7 +6,9 @@ import csv
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
+
 JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
+# keep this for test sw usage JSON_FILE= os.path.join(JSON_DIR, "aircraft_backup.json")
 EXCEL_FILE = "./aircraftDatabase.csv"
 REMOVE_TIMEOUT = 180
 HEARTBEAT_INTERVAL = 5
@@ -106,10 +108,19 @@ def print_dashboard_header():
     print("="*WIDTH)
 
 # ---------------- Dashboard sarakkeet lyhennetty ----------------
-    print(f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} {'Operator':<{OPERATORLEN}} {'Flight':<6} "
-      f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>{RSSILEN}} "
-      f"{'Msgs':>{MESSAGESLEN}} {'FirstSeen':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
-      f"{'Status':>7} {'Removed':>8} {'Callsign':<10} {'Owner':<10} {'Manufact':<15} ")
+    #print(f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} {'Operator':<{OPERATORLEN}} {'Flight':<6} "
+    #  f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>{RSSILEN}} "
+    #  f"{'Msgs':>{MESSAGESLEN}} {'FirstSeen':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
+    #  f"{'Status':>7} {'Removed':>8} {'Callsign':<10} {'Owner':<10} {'Manufact':<15} ")
+    print(
+        f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} "
+        f"{'Operator':<{OPERATORLEN}} {'Flight':<{FLIGHTLEN}} "
+        f"{'Lat':>9} {'Lon':>9} {'Alt':>6} {'Speed':>6} {'Track':>6} "
+        f"{'RSSI':>6} {'Msgs':>5} {'FirstSeen':>8} {'Vert':>6} "
+        f"{'Squawk':>6} {'Alert':>5} {'OnG':>3} {'Status':>7} {'Removed':>8} "
+        f"{'Callsign'} {'Owner'} {'Manufact'}"
+        )
+    
     print("-"*WIDTH)
 
     # ---------------- Dashboard sarakkeet ----------------
@@ -139,7 +150,7 @@ def print_dashboard_header():
 print_dashboard_header()
 print("Odottamassa koneita JSONista...")
 print("="*WIDTH)
-time.sleep(1)
+time.sleep(0.5)
 
 # ---------------- PÄÄSILMUKKA ----------------
 last_heartbeat = time.time()
@@ -149,12 +160,20 @@ try:
         now = time.time()
         planes = []
         if os.path.exists(JSON_FILE):
+            #try:
+            #    with open(JSON_FILE,"r") as f:
+            #        data = json.load(f)
+            #    planes = data.get("aircraft", [])
+            #except json.JSONDecodeError:
+            #    planes = []
+
             try:
                 with open(JSON_FILE,"r") as f:
                     data = json.load(f)
                 planes = data.get("aircraft", [])
             except json.JSONDecodeError:
-                planes = []
+                time.sleep(0.1)
+                continue
 
         # ---- Päivitä koneet ----
         for p in planes:
@@ -172,7 +191,8 @@ try:
                  "manufacturername":"??","operatorcallsign":"??","owner":"??"}
             )
 
-            flight = p.get("flight", "?")
+            #flight = p.get("flight", "?")
+            flight = (p.get("flight") or "?").strip()
             state = extract_state(p)
             messages = p.get("messages", 0)
 
@@ -228,17 +248,41 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-                print(f"{icao:{ICALEN}X} {pdata['registration']:<{REGLEN}} {pdata['type']:<{TYPELEN}} "
-                f"{pdata['operator'][:OPERATORLEN]:<{OPERATORLEN}} {pdata['flight'][:6]:<{FLIGHTLEN}} "
-                f"{s[3]:>7} {s[4]:>7} {s[0]:>5} {s[1]:>5} {s[2]:>6} {s[5]:>5} "
-                f"{pdata['messages']:>{MESSAGESLEN}} "
-                f"{pdata['first_seen']:>8} {pdata['vertical']:>8} {pdata['squawk']:>6} "
-                f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>3} "
-                f"{pdata['status']:>7} {removed_time:>8} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} {pdata['manufacturername']:<15}")
+                #print(f"{icao:{ICALEN}X} {pdata['registration']:<{REGLEN}} {pdata['type']:<{TYPELEN}} "
+                #f"{pdata['operator'][:OPERATORLEN]:<{OPERATORLEN}} {pdata['flight'][:6]:<{FLIGHTLEN}} "
+                #f"{s[3]:>7} {s[4]:>7} {s[0]:>5} {s[1]:>5} {s[2]:>6} {s[5]:>5} "
+                #f"{pdata['messages']:>{MESSAGESLEN}} "
+                #f"{pdata['first_seen']:>8} {pdata['vertical']:>8} {pdata['squawk']:>6} "
+                #f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>3} "
+                #f"{pdata['status']:>7} {removed_time:>8} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} {pdata['manufacturername']:<15}")
+                print(
+                    f"{icao:{ICALEN}X} "
+                    f"{pdata['registration']:<{REGLEN}} "
+                    f"{pdata['type']:<{TYPELEN}} "
+                    f"{pdata['operator'][:OPERATORLEN]:<{OPERATORLEN}} "
+                    f"{pdata['flight'][:FLIGHTLEN]:<{FLIGHTLEN}} "
+                    f"{s[3]:>9.5f} "
+                    f"{s[4]:>9.5f} "
+                    f"{s[0]:>6} "
+                    f"{s[1]:>6} "
+                    f"{s[2]:>6} "
+                    f"{s[5]:>6} "
+                    f"{pdata['messages']:>5} "
+                    f"{pdata['first_seen']:>8} "
+                    f"{pdata['vertical']:>6} "
+                    f"{pdata['squawk']:>6} "
+                    f"{str(pdata['alert']):>5} "
+                    f"{str(pdata['on_ground']):>3} "
+                    f"{pdata['status']:>7} "
+                    f"{removed_time:>8} "
+                    f"{pdata['operatorcallsign']} "
+                    f"{pdata['owner']} "
+                    f"{pdata['manufacturername']}"
+)
                 print("="*WIDTH)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
-        time.sleep(1)
+        time.sleep(0.5)
 
 except KeyboardInterrupt:
     clear_screen()
