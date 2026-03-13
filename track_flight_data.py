@@ -210,8 +210,8 @@ try:
 
             if icao_decimal not in planes_dict:
 
-                    beep()
-                    flash_screen()
+                beep()
+                flash_screen()
 
                 planes_dict[icao_decimal] = {
                     "flight": flight,
