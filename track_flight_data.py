@@ -27,6 +27,18 @@ MESSAGESLEN=4
 RSSILEN=5
 WIDTH=180
 
+#########################################################################
+
+
+def beep():
+    os.system("paplay /usr/share/sounds/freedesktop/stereo/complete.oga &")
+
+def flash_screen():
+    print("\033[?5h", end="", flush=True)  # invert screen
+    time.sleep(0.1)
+    print("\033[?5l", end="", flush=True)  # takaisin normaaliksi
+
+
 # ---------------- LUE CSV ----------------
 def load_aircraft_database():
     global aircraft_db
@@ -197,6 +209,10 @@ try:
             messages = p.get("messages", 0)
 
             if icao_decimal not in planes_dict:
+
+                    beep()
+                    flash_screen()
+
                 planes_dict[icao_decimal] = {
                     "flight": flight,
                     "state": state,
