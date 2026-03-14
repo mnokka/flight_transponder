@@ -4,6 +4,7 @@ import time
 import random
 import os
 from datetime import datetime
+import math
 
 # --- ASETUKSET ---
 JSON_DIR = "./json_data"
@@ -106,8 +107,11 @@ while True:
 
         if not p["flight"].startswith("FIN"):
 
-            p["lat"] += random.uniform(-0.002,0.002)
-            p["lon"] += random.uniform(-0.002,0.002)
+            #p["lat"] += random.uniform(-0.002,0.002)
+            #p["lon"] += random.uniform(-0.002,0.002)
+
+            p["lat"] += 0.002 * math.cos(math.radians(p["track"]))
+            p["lon"] += 0.002 * math.sin(math.radians(p["track"]))
 
             p["altitude"] += random.randint(-100,100)
             p["speed"] += random.randint(-10,10)

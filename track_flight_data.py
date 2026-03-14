@@ -3,12 +3,14 @@ import subprocess, select
 from datetime import datetime, timedelta
 import json, os, time
 import csv
+import folium
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
 
-JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
-# keep this for test sw usage JSON_FILE= os.path.join(JSON_DIR, "aircraft_backup.json")
+#JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
+# keep this for test sw usage 
+JSON_FILE= os.path.join(JSON_DIR, "aircraft_backup.json")
 EXCEL_FILE = "./aircraftDatabase.csv"
 REMOVE_TIMEOUT = 180
 HEARTBEAT_INTERVAL = 5
@@ -29,6 +31,86 @@ MESSAGESLEN=4
 RSSILEN=5
 WIDTH=180
 
+plane_colors = {}
+
+COLOR_POOL = [
+    "red","blue","green","purple","orange",
+    "darkred","lightred","beige","darkblue",
+    "darkgreen","cadetblue","darkpurple","white"
+]
+
+map_file = "map.html"
+
+plane_last_marker_time = {}
+MARKER_INTERVAL = 5   # sekuntia
+
+if os.path.exists(map_file):
+       os.remove(map_file)
+       print("Delete old map file\n")
+
+     
+m = folium.Map(location=[61.0,25.0], zoom_start=6)
+m.save(map_file)
+print("Created a new map file\n")
+
+#########################################################################
+
+def get_plane_color(icao):
+
+    if icao not in plane_colors:
+        color = COLOR_POOL[len(plane_colors) % len(COLOR_POOL)]
+        plane_colors[icao] = color
+
+    return plane_colors[icao]
+###########################################################################
+
+def update_all_planes_map(planes_dict):
+    for icao, p in planes_dict.items():
+        if p is None:
+            continue
+
+        # lisätään historia listaan
+        if "history" not in p:
+            p["history"] = []
+
+        lat = p["state"][3]
+        lon = p["state"][4]
+        if lat == 0 or lon == 0:
+            continue
+
+        color = get_plane_color(icao)
+        flight = p["flight"]
+        alt = p["state"][0]
+        speed = p["state"][1]
+
+        # lisätään nykyinen sijainti historiaan
+        p["history"].append((lat, lon))
+
+        # piirretään kaikki historialliset sijainnit
+        for loc in p["history"]:
+            folium.CircleMarker(
+                location=loc,
+                radius=5,
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.8,
+                tooltip=f"{flight} {alt} ft {speed} kt"
+            ).add_to(m)
+
+        # piirretään viiva historian läpi (valinnainen)
+        if len(p["history"]) > 1:
+            folium.PolyLine(
+                locations=p["history"],
+                color=color,
+                weight=2,
+                opacity=0.6
+            ).add_to(m)
+
+    m.save(map_file)
+
+
+
 #########################################################################
 
 
@@ -47,6 +129,10 @@ def load_aircraft_database():
     if not os.path.exists(EXCEL_FILE):
         print("CSV metadata file not found.")
         return
+
+
+    
+
 
     with open(EXCEL_FILE, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -255,10 +341,18 @@ try:
                     f"{pdata['owner']} "
                     f"{pdata['manufacturername']}"
                 )
+               
                 print("="*WIDTH)
+            update_all_planes_map(planes_dict)
+
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
-        time.sleep(0.5)
+
+        #if int(time.time()) % 10 == 0:
+          #  update_map(planes_dict,icao)
+
+        time.sleep(2)
+
 
 except KeyboardInterrupt:
     clear_screen()
