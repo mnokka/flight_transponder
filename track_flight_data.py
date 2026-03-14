@@ -17,6 +17,8 @@ planes_dict = {}
 aircraft_db = {}
 start_time = time.time()
 
+# ⭐ KORJAUS: viimeisin validi JSON data
+last_planes = []
 
 ICALEN=6
 REGLEN=6   
@@ -119,11 +121,6 @@ def print_dashboard_header():
     print(f"Running time: {format_runtime(time.time() - start_time)}")
     print("="*WIDTH)
 
-# ---------------- Dashboard sarakkeet lyhennetty ----------------
-    #print(f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} {'Operator':<{OPERATORLEN}} {'Flight':<6} "
-    #  f"{'Lat':>7} {'Lon':>7} {'Alt':>5} {'Speed':>5} {'TrackAngle':>6} {'RSSI':>{RSSILEN}} "
-    #  f"{'Msgs':>{MESSAGESLEN}} {'FirstSeen':>8} {'VertSpeed':>8} {'Squawk':>6} {'Alert':>5} {'OnG':>3} "
-    #  f"{'Status':>7} {'Removed':>8} {'Callsign':<10} {'Owner':<10} {'Manufact':<15} ")
     print(
         f"{'ICAO':<{ICALEN}} {'Reg':<{REGLEN}} {'Type':<{TYPELEN}} "
         f"{'Operator':<{OPERATORLEN}} {'Flight':<{FLIGHTLEN}} "
@@ -134,30 +131,6 @@ def print_dashboard_header():
         )
     
     print("-"*WIDTH)
-
-    # ---------------- Dashboard sarakkeet ----------------
-    # ICAO       -> Koneen ICAO-tunnus 6
-    # Reg        -> Rekisteritunnus 6
-    # Type       -> Lentokoneen tyyppikoodi ?
-    # Operator   -> Lentoyhtiö tai operaattori ?
-    # Flight     -> Lentotunnus / flight code ?
-    # Lat / Lon  -> Sijainti 4 4 
-    # Alt        -> Korkeus jalassa 5
-    # Speed      -> Nopeus ?
-    # TrackAngle -> Kurssi / heading
-    # RSSI       -> Signaalin voimakkuus 5
-    # Msgs       -> Viestien määrä 3
-    # First      -> Ensimmäinen havainto 8 
-    # VertSpeed  -> Vertikaalinopeus (nousu/lasku)
-    # Squawk     -> Squawk-koodi
-    # Alert      -> Hälytys / Emergency
-    # OnG        -> Maassa / on ground
-    # Manufact   -> Valmistaja
-    # Callsign   -> Operaattorin kutsumerkki
-    # Owner      -> Omistaja 30
-    # Status     -> Tilanne ACTIVE / REMOVED 7
-    # Removed    -> Viimeinen poistettu-aika 8
-
 
 print_dashboard_header()
 print("Odottamassa koneita JSONista...")
@@ -172,20 +145,15 @@ try:
         now = time.time()
         planes = []
         if os.path.exists(JSON_FILE):
-            #try:
-            #    with open(JSON_FILE,"r") as f:
-            #        data = json.load(f)
-            #    planes = data.get("aircraft", [])
-            #except json.JSONDecodeError:
-            #    planes = []
 
             try:
                 with open(JSON_FILE,"r") as f:
                     data = json.load(f)
                 planes = data.get("aircraft", [])
+                last_planes = planes   # ⭐ tallennetaan viimeisin hyvä data
+
             except json.JSONDecodeError:
-                time.sleep(0.1)
-                continue
+                planes = last_planes   # ⭐ käytetään edellistä dataa
 
         # ---- Päivitä koneet ----
         for p in planes:
@@ -203,7 +171,6 @@ try:
                  "manufacturername":"??","operatorcallsign":"??","owner":"??"}
             )
 
-            #flight = p.get("flight", "?")
             flight = (p.get("flight") or "?").strip()
             state = extract_state(p)
             messages = p.get("messages", 0)
@@ -264,13 +231,6 @@ try:
             for icao, pdata in planes_dict.items():
                 s = pdata["state"]
                 removed_time = pdata["removed_time"] or "-"
-                #print(f"{icao:{ICALEN}X} {pdata['registration']:<{REGLEN}} {pdata['type']:<{TYPELEN}} "
-                #f"{pdata['operator'][:OPERATORLEN]:<{OPERATORLEN}} {pdata['flight'][:6]:<{FLIGHTLEN}} "
-                #f"{s[3]:>7} {s[4]:>7} {s[0]:>5} {s[1]:>5} {s[2]:>6} {s[5]:>5} "
-                #f"{pdata['messages']:>{MESSAGESLEN}} "
-                #f"{pdata['first_seen']:>8} {pdata['vertical']:>8} {pdata['squawk']:>6} "
-                #f"{str(pdata['alert']):>5} {str(pdata['on_ground']):>3} "
-                #f"{pdata['status']:>7} {removed_time:>8} {pdata['operatorcallsign']:<10} {pdata['owner']:<10} {pdata['manufacturername']:<15}")
                 print(
                     f"{icao:{ICALEN}X} "
                     f"{pdata['registration']:<{REGLEN}} "
@@ -294,7 +254,7 @@ try:
                     f"{pdata['operatorcallsign']} "
                     f"{pdata['owner']} "
                     f"{pdata['manufacturername']}"
-)
+                )
                 print("="*WIDTH)
             print(f"Yhteensä päivän aikana nähtyjä koneita: {len(planes_dict)}")
 
