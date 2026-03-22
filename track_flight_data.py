@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
+
+# by mika.nokka1@gmail.com 2026
+
 import subprocess, select
 from datetime import datetime, timedelta
 import json, os, time
 import csv
 import folium
+import signal
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
 JSON_FILE = os.path.join(JSON_DIR, "aircraft.json")
-#JSON_FILE = os.path.join(JSON_DIR, "aircraft_backup.json")
 EXCEL_FILE = "./aircraftDatabase.csv"
 
 REMOVE_TIMEOUT = 180
 LOST_TIMEOUT = 10
 HEARTBEAT_INTERVAL = 5
+JSON_STALE_TIMEOUT = 300  # 5 minuuttia
+
+DUMP_START_GRACE = 10  # dumpille aikaa käynnistyä resetin jälkeen
+WATCHDOG_MIN_INTERVAL = 30  # sekunteina, vähintään 30s väli watchdog reset logille
 
 DEBUG_FILE = "debug.log"
 
 planes_dict = {}
 aircraft_db = {}
 start_time = time.time()
-
 last_planes = []
+last_reset_time = "-"
+last_dump_start_time = 0  
+first_run_reset_shown = False  # ensimmäisen käynnistyksen reset-viesti
+last_watchdog_reset = 0       # viimeisin watchdog-resetin aikaleima
 
 ICALEN=6
 REGLEN=6   
@@ -31,7 +41,6 @@ FLIGHTLEN=6
 WIDTH=200
 
 plane_colors = {}
-
 COLOR_POOL = [
     "red","blue","green","purple","orange",
     "darkred","lightred","beige","darkblue",
@@ -39,7 +48,6 @@ COLOR_POOL = [
 ]
 
 map_file = "map.html"
-
 if os.path.exists(map_file):
     os.remove(map_file)
 
@@ -57,18 +65,13 @@ def safe_read_json(path, last_good, retries=5, delay=0.05):
         try:
             if not os.path.exists(path):
                 return last_good
-
             with open(path, "r") as f:
                 data = json.load(f)
-
             if "aircraft" in data:
                 return data["aircraft"]
-
         except Exception:
             pass
-
         time.sleep(delay)
-
     return last_good
 
 # ---------------- MAP ----------------
@@ -81,20 +84,14 @@ def update_all_planes_map(planes_dict):
     for icao, p in planes_dict.items():
         lat = p["state"][3]
         lon = p["state"][4]
-
         if lat == 0 or lon == 0:
             continue
-
         if "history" not in p:
             p["history"] = []
-
         if p["history"] and p["history"][-1] == (lat, lon):
             continue
-
         p["history"].append((lat, lon))
-
         color = get_plane_color(icao)
-
         folium.CircleMarker(
             location=[lat, lon],
             radius=5,
@@ -103,7 +100,6 @@ def update_all_planes_map(planes_dict):
             fill_color=color,
             fill_opacity=0.8,
         ).add_to(m)
-
         if len(p["history"]) > 1:
             folium.PolyLine(
                 locations=[p["history"][-2], (lat, lon)],
@@ -111,6 +107,29 @@ def update_all_planes_map(planes_dict):
                 weight=2,
                 opacity=0.6
             ).add_to(m)
+
+        tooltip_text = (
+            f"Flight: {p['flight']}\n"
+            f"Reg: {p.get('registration','??')}\n"
+            f"Operator: {p.get('operator','??')}\n"
+            f"Type: {p.get('type','??')}\n"
+            f"Altitude: {p['state'][0]} ft\n"
+            f"Speed: {p['state'][1]} kt\n"
+            f"Track: {p['state'][2]}°\n"
+            f"RSSI: {p['state'][5]}\n"
+            f"Owner: {p.get('owner','??')}\n"
+            f"Manufacturer: {p.get('manufacturername','??')}"
+        )
+
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=5,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.8,
+            tooltip=tooltip_text
+        ).add_to(m)
 
         tmp = map_file + ".tmp"
         m.save(tmp)
@@ -135,7 +154,6 @@ def format_runtime(seconds):
 def load_aircraft_database():
     if not os.path.exists(EXCEL_FILE):
         return
-
     with open(EXCEL_FILE, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -146,7 +164,6 @@ def load_aircraft_database():
                 icao_decimal = int(str(raw_icao).strip().lower().replace("0x",""), 16)
             except:
                 continue
-
             aircraft_db[icao_decimal] = {
                 "registration": row.get("registration","??"),
                 "typecode": row.get("typecode","??"),
@@ -167,16 +184,66 @@ def extract_state(p):
         round(p.get("rssi") or 0.0,1)
     )
 
+# ---------------- DUMP MANAGEMENT ----------------
+dump_proc = None
+def start_dump(show_output=False, is_watchdog=False):
+    global dump_proc, last_dump_start_time, last_reset_time
+    global first_run_reset_shown, last_watchdog_reset
+
+    now = time.time()
+
+    # 🔹 Tappaa kaikki vanhat dump1090-prosessit
+    try:
+        subprocess.run(["pkill", "-f", "dump1090-mutability"], check=False)
+    except Exception as e:
+        debug(f"pkill failed: {e}")
+
+    time.sleep(1)  # pieni viive varmistamaan prosessin kuoleminen
+
+    # 🔹 Käynnistä uusi dump1090
+    dump_proc = subprocess.Popen(
+        ["dump1090-mutability", "--net", "--write-json", JSON_DIR],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        preexec_fn=os.setsid
+    )
+
+    last_dump_start_time = now
+
+    # 🔹 Reset-viesti
+    if not first_run_reset_shown:
+        last_reset_time = datetime.now().strftime("%H:%M:%S")
+        first_run_reset_shown = True
+        print("Dump1090 started/restarted (initial run)")
+        debug("Dump1090 started/restarted (initial run)")
+    elif is_watchdog and now - last_watchdog_reset > WATCHDOG_MIN_INTERVAL:
+        last_watchdog_reset = now
+        last_reset_time = datetime.now().strftime("%H:%M:%S")
+        print(f"⚠ Watchdog reset at {last_reset_time}")
+        debug(f"Watchdog reset at {last_reset_time}")
+    else:
+        debug("Dump1090 restarted without reset message (watchdog too recent)")
+
+    if show_output and dump_proc.stdout:
+        timeout = 5
+        start = time.time()
+        while time.time() - start < timeout:
+            ready, _, _ = select.select([dump_proc.stdout], [], [], 0.1)
+            for stream in ready:
+                line = stream.readline()
+                if line:
+                    print(line, end="")
+
+def check_json_fresh():
+    if not os.path.exists(JSON_FILE):
+        return False
+    last_mod = os.path.getmtime(JSON_FILE)
+    return time.time() - last_mod < JSON_STALE_TIMEOUT
+
 # ---------------- START ----------------
 load_aircraft_database()
-
-proc = subprocess.Popen(
-    ["dump1090-mutability", "--net", "--write-json", JSON_DIR],
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-    text=True
-)
-
+start_dump(show_output=True)
 time.sleep(3)
 
 # ---------------- DASHBOARD ----------------
@@ -185,8 +252,8 @@ def print_dashboard_header():
     print("="*WIDTH)
     print(f"DASHBOARD {datetime.now()}")
     print(f"Running: {format_runtime(time.time() - start_time)}")
+    print(f"Last reset: {last_reset_time}")
     print("="*WIDTH)
-
     print(
         f"{'ICAO':<6} {'Reg':<6} {'Type':<4} {'Op':<8} {'Flight':<6} "
         f"{'Lat':>9} {'Lon':>9} {'Alt':>6} {'Spd':>6} {'Trk':>6} "
@@ -203,6 +270,13 @@ try:
     while True:
         now = time.time()
 
+        if now - last_dump_start_time < DUMP_START_GRACE:
+            debug("Skip freshness check (grace)")
+        else:
+            if not check_json_fresh():
+                start_dump(show_output=False, is_watchdog=True)
+                last_planes = []
+
         if os.path.exists(JSON_FILE):
             planes = safe_read_json(JSON_FILE, last_planes)
             last_planes = planes
@@ -211,12 +285,10 @@ try:
 
         debug(f"planes={len(planes)} tracked={len(planes_dict)}")
 
-        # ---- UPDATE ----
         for p in planes:
             raw_icao = p.get("hex")
             if not raw_icao:
                 continue
-
             try:
                 icao = int(raw_icao,16)
             except:
@@ -235,7 +307,6 @@ try:
             if icao not in planes_dict:
                 beep()
                 flash_screen()
-
                 planes_dict[icao] = {
                     "flight": flight,
                     "state": state,
@@ -255,10 +326,8 @@ try:
                     "owner": meta.get("owner","??"),
                     "manufacturername": meta.get("manufacturername","??")
                 }
-
             else:
                 pdata = planes_dict[icao]
-
                 pdata["state"] = state
                 pdata["last_seen"] = now
                 pdata["flight"] = flight
@@ -268,22 +337,17 @@ try:
                 pdata["alert"] = alert
                 pdata["on_ground"] = on_ground
 
-        # ---- LOST / REMOVED ----
         for icao, pdata in planes_dict.items():
             age = now - pdata["last_seen"]
-
             if age > REMOVE_TIMEOUT:
                 if pdata["status"] != "REMOVED":
                     pdata["status"] = "REMOVED"
                     pdata["removed_time"] = datetime.now().strftime("%H:%M:%S")
-
             elif age > LOST_TIMEOUT:
                 pdata["status"] = "LOST"
-
             else:
                 pdata["status"] = "ACTIVE"
 
-        # ---- PRINT ----
         print_dashboard_header()
 
         if not planes_dict:
@@ -316,11 +380,10 @@ try:
                 )
 
         print("="*WIDTH)
-
         update_all_planes_map(planes_dict)
-
         time.sleep(2)
 
 except KeyboardInterrupt:
-    proc.terminate()
+    if dump_proc:
+        os.killpg(os.getpgid(dump_proc.pid), signal.SIGTERM)
     print("\nStopped")
