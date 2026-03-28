@@ -32,7 +32,7 @@ last_planes = []
 last_reset_time = "-"
 last_dump_start_time = 0  
 first_run_reset_shown = False  # ensimmäisen käynnistyksen reset-viesti
-last_watchdog_reset = 0       # viimeisin watchdog-resetin aikaleima
+last_watchdog_reset = 0       
 
 ICALEN=6
 REGLEN=6   
@@ -56,13 +56,19 @@ if os.path.exists(map_file):
     os.remove(map_file)
 
 dumplog = open(DUMP_LOG, "a")
+dumplog.write(f"*************** NEW LOG ENTRY ****************************************\n")
+dumplog.write(f"{datetime.now()}\n")
+
+f=open(DEBUG_FILE, "a")  
+f.write(f"*************** NEW LOG ENTRY ******************************************\n")
+f.write(f"{datetime.now()}\n")
 
 # ---------------- DEBUG ----------------
 def debug(msg):
-    with open(DEBUG_FILE, "a") as f:
         f.write(f"{datetime.now()} {msg}\n")
+        f.flush()
 
-# ---------------- JSON SAFE ----------------
+# ---------------- UNDER UPDATING JSON FILE SAFE READ----------------
 def safe_read_json(path, last_good, retries=5, delay=0.05):
     for _ in range(retries):
         try:
@@ -73,7 +79,8 @@ def safe_read_json(path, last_good, retries=5, delay=0.05):
             if "aircraft" in data:
                 return data["aircraft"]
         except Exception:
-            pass
+            #pass
+            debug(f"JSON read error: {e}")
         time.sleep(delay)
     return last_good
 
@@ -135,7 +142,7 @@ def update_all_planes_map(planes_dict):
     m.save(tmp)
     os.replace(tmp, map_file)
 
-# ---------------- UTIL ----------------
+# ---------------- UTILITIES ----------------
 def beep():
     os.system("paplay /usr/share/sounds/freedesktop/stereo/complete.oga &")
 
@@ -170,7 +177,8 @@ def load_aircraft_database():
                 "operator": row.get("operator","??"),
                 "manufacturername": row.get("manufacturername","??"),
                 "operatorcallsign": row.get("operatorcallsign","??"),
-                "owner": row.get("owner","??")
+                "owner": row.get("owner","??"),
+                "model": row.get("model","??")
             }
 
 # ---------------- HELPER ----------------
@@ -193,29 +201,14 @@ def start_dump(show_output=False, is_watchdog=False):
 
     now = time.time()
 
-    # 🔹 Tappaa kaikki vanhat dump1090-prosessit
-    #try:
-    #    subprocess.run(["pkill", "-f", "dump1090-mutability"], check=False)
-    #except Exception as e:
-    #    debug(f"pkill failed: {e}")
-
-    #if dump_proc:
-     #   debug(f"Old dump status: {dump_proc.poll()}")
-     #   try:
-     #       os.killpg(os.getpgid(dump_proc.pid), signal.SIGTERM)
-     #       dump_proc.wait(timeout=5)   # 🔴 TÄRKEIN RIVI
-     #   except Exception as e:
-     #       debug(f"Failed to stop dump1090: {e}")
-
-
     if dump_proc and dump_proc.poll() is None:
         try:
             os.killpg(os.getpgid(dump_proc.pid), signal.SIGTERM)
             dump_proc.wait(timeout=7)
         except Exception as e:
-            debug(f"Failed to stop dump1090: {e}")
+            debug(f"Failed to stop dump1090: {e} \n")
     else:
-        debug("dump1090 already dead, no need to kill")
+        debug("dump1090 already dead, no need to kill\n")
 
         time.sleep(10) # pieni viive varmistamaan prosessin kuoleminen
 
@@ -223,26 +216,25 @@ def start_dump(show_output=False, is_watchdog=False):
     # 🔹 Käynnistä uusi dump1090
     dump_proc = subprocess.Popen(
         ["dump1090-mutability", "--net", "--write-json", JSON_DIR],
-        #stdout=subprocess.PIPE,
+        #stdout=subprocess.PIPE, # if pipe not flushed, crashing
         #stderr=subprocess.STDOUT,
         stdout=dumplog,
         stderr=dumplog,
-
         text=True,
         preexec_fn=os.setsid
     )
     #time.sleep(5)
     
     if dump_proc.poll() is not None:
-        print("dump1090 died immediately!")
+        debug("dump1090 died immediately!\n")
 
         if dump_proc.stdout:
             try:
-                print("---- dump1090 output ----")
-                print(dump_proc.stdout.read())
-                print("------------------------")
+                debug("---- dump1090 output ----\n")
+                debug(dump_proc.stdout.read())
+                debug("\ņ------------------------\n")
             except Exception as e:
-                print(f"Failed to read output: {e}")
+                debug(f"Failed to read output: {e}")
     
     #subprocess.run(["rtl_test", "-t"], timeout=5)
 
@@ -253,12 +245,12 @@ def start_dump(show_output=False, is_watchdog=False):
         last_reset_time = datetime.now().strftime("%H:%M:%S")
         first_run_reset_shown = True
         print("Dump1090 started/restarted (initial run)")
-        debug("Dump1090 started/restarted (initial run)")
+        debug("Dump1090 started/restarted (initial run)\n")
     elif is_watchdog and now - last_watchdog_reset > WATCHDOG_MIN_INTERVAL:
         last_watchdog_reset = now
         last_reset_time = datetime.now().strftime("%H:%M:%S")
         print(f"⚠ Watchdog reset at {last_reset_time}")
-        debug(f"Watchdog reset at {last_reset_time}")
+        debug(f"Watchdog reset at {last_reset_time}\ņ")
         # 🔹 Tyhjennetään vanhat lentokoneet resetin yhteydessä
         #planes_dict.clear()
         #last_planes = []
@@ -284,6 +276,7 @@ def check_json_fresh():
     return time.time() - last_mod < JSON_STALE_TIMEOUT
 
 # ---------------- START ----------------
+print("Starting...")
 load_aircraft_database()
 start_dump(show_output=True)
 time.sleep(3)
@@ -292,7 +285,7 @@ time.sleep(3)
 def print_dashboard_header():
     clear_screen()
     print("="*WIDTH)
-    print(f"DASHBOARD {datetime.now()}")
+    print(f"DASHBOARD {datetime.now()}    Map:{map_file}   Debug:{DEBUG_FILE}   Dump:{DUMP_LOG}")
     print(f"Running: {format_runtime(time.time() - start_time)}")
     print(f"Last reset: {last_reset_time}")
     print("="*WIDTH)
@@ -301,7 +294,7 @@ def print_dashboard_header():
         f"{'Lat':>9} {'Lon':>9} {'Alt':>6} {'Spd':>6} {'Trk':>6} "
         f"{'RSSI':>6} {'Msgs':>5} {'FirstSeen':>8} {'Vert':>6} {'Squawk':>6} "
         f"{'Alert':>5} {'OnG':>3} {'Status':>7} {'Removed':>8} "
-        f"{'Callsign'} {'Owner'} {'Manufact'}"
+        f"{'Callsign'} {'Owner'} {'Manufact'} {'Model'}" 
     )
     print("-"*WIDTH)
 
@@ -365,7 +358,8 @@ try:
                     "messages": messages,
                     "operatorcallsign": meta.get("operatorcallsign","??"),
                     "owner": meta.get("owner","??"),
-                    "manufacturername": meta.get("manufacturername","??")
+                    "manufacturername": meta.get("manufacturername","??"),
+                    "model": meta.get("model","??")
                 }
             else:
                 pdata = planes_dict[icao]
@@ -415,9 +409,10 @@ try:
                     f"{str(p['on_ground']):>3} "
                     f"{p['status']:>7} "
                     f"{(p['removed_time'] or '-'):>8} "
-                    f"{p['operatorcallsign']} "
-                    f"{p['owner']} "
-                    f"{p['manufacturername']}"
+                    f"{p['operatorcallsign']} | "
+                    f"{p['owner']} | "
+                    f"{p['manufacturername']} | "
+                    f"{p['model']} "
                 )
 
         print("="*WIDTH)
@@ -427,4 +422,6 @@ try:
 except KeyboardInterrupt:
     if dump_proc:
         os.killpg(os.getpgid(dump_proc.pid), signal.SIGTERM)
-    print("\nStopped")
+    print("CTRL-C Stopped")
+    debug("CTRL-C Stopped\n")
+    dumplog.write(f"CTRL-C Stopped\n")
