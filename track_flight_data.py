@@ -8,6 +8,9 @@ import json, os, time
 import csv
 import folium
 import signal
+import sys
+import tty
+import termios
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
@@ -23,7 +26,8 @@ DUMP_START_GRACE = 10  # dumpille aikaa käynnistyä resetin jälkeen
 WATCHDOG_MIN_INTERVAL = 30  # sekunteina, vähintään 30s väli watchdog reset logille
 
 DEBUG_FILE = "debug.log"
-DUMP_LOG="dump109.l0g"
+DUMP_LOG="dump109.log"
+
 
 planes_dict = {}
 aircraft_db = {}
@@ -55,6 +59,9 @@ map_file = "map.html"
 if os.path.exists(map_file):
     os.remove(map_file)
 
+MAP_SAVE_INTERVAL = 200      
+last_map_save = 0
+
 dumplog = open(DUMP_LOG, "a")
 dumplog.write(f"*************** NEW LOG ENTRY ****************************************\n")
 dumplog.write(f"{datetime.now()}\n")
@@ -62,6 +69,14 @@ dumplog.write(f"{datetime.now()}\n")
 f=open(DEBUG_FILE, "a")  
 f.write(f"*************** NEW LOG ENTRY ******************************************\n")
 f.write(f"{datetime.now()}\n")
+
+
+dfilename = f"Dashboard_{datetime.now().replace(microsecond=0)}"
+dfilename = dfilename.replace(":", "-").replace(" ", "_") + ".txt"
+dasboardf=open(dfilename, "w")
+last_save_time = "-"
+
+
 
 # ---------------- DEBUG ----------------
 def debug(msg):
@@ -78,7 +93,7 @@ def safe_read_json(path, last_good, retries=5, delay=0.05):
                 data = json.load(f)
             if "aircraft" in data:
                 return data["aircraft"]
-        except Exception:
+        except Exception as e:
             #pass
             debug(f"JSON read error: {e}")
         time.sleep(delay)
@@ -130,7 +145,7 @@ def update_all_planes_map(planes_dict):
 
         folium.CircleMarker(
             location=[lat, lon],
-            radius=5,
+            radius=4,
             color=color,
             fill=True,
             fill_color=color,
@@ -138,9 +153,12 @@ def update_all_planes_map(planes_dict):
             tooltip=tooltip_text
         ).add_to(m)
 
-    tmp = map_file + ".tmp"
-    m.save(tmp)
-    os.replace(tmp, map_file)
+    now_time = time.time()
+    if now_time - last_map_save > MAP_SAVE_INTERVAL:
+        tmp = map_file + ".tmp"
+        m.save(tmp)
+        os.replace(tmp, map_file)
+        last_map_save = now_time
 
 # ---------------- UTILITIES ----------------
 def beep():
@@ -213,7 +231,6 @@ def start_dump(show_output=False, is_watchdog=False):
         time.sleep(10) # pieni viive varmistamaan prosessin kuoleminen
 
     
-    # 🔹 Käynnistä uusi dump1090
     dump_proc = subprocess.Popen(
         ["dump1090-mutability", "--net", "--write-json", JSON_DIR],
         #stdout=subprocess.PIPE, # if pipe not flushed, crashing
@@ -223,7 +240,7 @@ def start_dump(show_output=False, is_watchdog=False):
         text=True,
         preexec_fn=os.setsid
     )
-    #time.sleep(5)
+
     
     if dump_proc.poll() is not None:
         debug("dump1090 died immediately!\n")
@@ -240,7 +257,7 @@ def start_dump(show_output=False, is_watchdog=False):
 
     last_dump_start_time = now
 
-    # 🔹 Reset-viesti
+
     if not first_run_reset_shown:
         last_reset_time = datetime.now().strftime("%H:%M:%S")
         first_run_reset_shown = True
@@ -250,10 +267,8 @@ def start_dump(show_output=False, is_watchdog=False):
         last_watchdog_reset = now
         last_reset_time = datetime.now().strftime("%H:%M:%S")
         print(f"⚠ Watchdog reset at {last_reset_time}")
-        debug(f"Watchdog reset at {last_reset_time}\ņ")
-        # 🔹 Tyhjennetään vanhat lentokoneet resetin yhteydessä
-        #planes_dict.clear()
-        #last_planes = []
+        debug(f"Watchdog reset at {last_reset_time}\n")
+
     else:
         debug("Dump1090 restarted without reset message (watchdog too recent)")
 
@@ -275,6 +290,66 @@ def check_json_fresh():
     last_mod = os.path.getmtime(JSON_FILE)
     return time.time() - last_mod < JSON_STALE_TIMEOUT
 
+# ----------------------- STORE DASHBOARD ---------------------------------------------------------
+
+def write_snapshot(planes_dict):
+    
+    global last_save_time
+
+    last_save_time = datetime.now().strftime("%H:%M:%S")
+
+    dasboardf.write("="*WIDTH + "\n")
+    dasboardf.write(f"DASHBOARD {datetime.now()}    Map:{map_file}   Debug:{DEBUG_FILE}   Dump:{DUMP_LOG}   Dashboard file:{dfilename}")
+    dasboardf.write(f"Running: {format_runtime(time.time() - start_time)}\n")
+    dasboardf.write(f"Last reset: {last_reset_time}\n")
+    dasboardf.write("="*WIDTH + "\n")
+
+    dasboardf.write(
+        f"{'ICAO':<6} {'Reg':<6} {'Type':<4} {'Op':<8} {'Flight':<6} "
+        f"{'Lat':>9} {'Lon':>9} {'Alt':>6} {'Spd':>6} {'Trk':>6} "
+        f"{'RSSI':>6} {'Msgs':>5} {'FirstSeen':>8} {'Vert':>6} {'Squawk':>6} "
+        f"{'Alert':>5} {'OnG':>3} {'Status':>7} {'Removed':>8} "
+        f"{'Callsign'} {'Owner'} {'Manufact'} {'Model'}\n"
+    )
+
+    dasboardf.write("-"*WIDTH + "\n")
+
+    if not planes_dict:
+        dasboardf.write("Ei havaintoja – ohjelma toimii\n")
+    else:
+        for icao, p in planes_dict.items():
+            s = p["state"]
+
+            dasboardf.write(
+                f"{icao:06X} "
+                f"{p['registration'][:6]:<6} "
+                f"{p['type'][:4]:<4} "
+                f"{p['operator'][:8]:<8} "
+                f"{p['flight'][:6]:<6} "
+                f"{s[3]:>9.5f} {s[4]:>9.5f} "
+                f"{s[0]:>6} {s[1]:>6} {s[2]:>6} "
+                f"{s[5]:>6} "
+                f"{p['messages']:>5} "
+                f"{p['first_seen']:>8} "
+                f"{p['vertical']:>6} "
+                f"{p['squawk']:>6} "
+                f"{str(p['alert']):>5} "
+                f"{str(p['on_ground']):>3} "
+                f"{p['status']:>7} "
+                f"{(p['removed_time'] or '-'):>8} "
+                f"{p['operatorcallsign']} | "
+                f"{p['owner']} | "
+                f"{p['manufacturername']} | "
+                f"{p['model']}\n"
+            )
+
+    dasboardf.write("="*WIDTH + "\n\n")
+    dasboardf.flush()
+
+
+
+
+
 # ---------------- START ----------------
 print("Starting...")
 load_aircraft_database()
@@ -285,9 +360,9 @@ time.sleep(3)
 def print_dashboard_header():
     clear_screen()
     print("="*WIDTH)
-    print(f"DASHBOARD {datetime.now()}    Map:{map_file}   Debug:{DEBUG_FILE}   Dump:{DUMP_LOG}")
+    print(f"DASHBOARD {datetime.now()}    Map:{map_file}   Debug:{DEBUG_FILE}   Dump:{DUMP_LOG}   Dashboard file:{dfilename}")
     print(f"Running: {format_runtime(time.time() - start_time)}")
-    print(f"Last reset: {last_reset_time}")
+    print(f"Last reset: {last_reset_time}   Last saved (s): {last_save_time}")
     print("="*WIDTH)
     print(
         f"{'ICAO':<6} {'Reg':<6} {'Type':<4} {'Op':<8} {'Flight':<6} "
@@ -302,6 +377,12 @@ def print_dashboard_header():
 last_heartbeat = time.time()
 
 try:
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+
+    debugcount=0
     while True:
         now = time.time()
 
@@ -317,7 +398,10 @@ try:
         else:
             planes = last_planes
 
-        debug(f"planes={len(planes)} tracked={len(planes_dict)}")
+        debugcount=debugcount+1
+        if (debugcount > 60):
+            debugcount=0
+            debug(f"planes={len(planes)} tracked={len(planes_dict)}")
 
         for p in planes:
             raw_icao = p.get("hex")
@@ -417,7 +501,14 @@ try:
 
         print("="*WIDTH)
         update_all_planes_map(planes_dict)
-        time.sleep(2)
+       
+        if select.select([sys.stdin], [], [], 0)[0]:
+            key = sys.stdin.read(1)
+            if key == "s":
+                print("S painettu")
+                time.sleep(0.2)
+                write_snapshot(planes_dict)
+        time.sleep(0.5)
 
 except KeyboardInterrupt:
     if dump_proc:
@@ -425,3 +516,9 @@ except KeyboardInterrupt:
     print("CTRL-C Stopped")
     debug("CTRL-C Stopped\n")
     dumplog.write(f"CTRL-C Stopped\n")
+
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    dumplog.close()
+    f.close()
+    dasboardf.close()
