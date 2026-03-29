@@ -153,11 +153,13 @@ def update_all_planes_map(planes_dict):
             tooltip=tooltip_text
         ).add_to(m)
 
+    global last_map_save
     now_time = time.time()
     if now_time - last_map_save > MAP_SAVE_INTERVAL:
         tmp = map_file + ".tmp"
         m.save(tmp)
         os.replace(tmp, map_file)
+      
         last_map_save = now_time
 
 # ---------------- UTILITIES ----------------
