@@ -204,7 +204,8 @@ def load_aircraft_database():
 # ---------------- HELPER ----------------
 def extract_state(p):
     return (
-        round(p.get("altitude") or 0,0),
+        #round(p.get("altitude") or 0,0),
+        round(float(p.get("altitude") or 0), 0),
         round(p.get("speed") or 0,0),
         round(p.get("track") or 0,0),
         round(p.get("lat") or 0.0,5),
