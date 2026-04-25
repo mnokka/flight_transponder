@@ -13,6 +13,7 @@ import tty
 import termios
 import threading
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from folium.plugins import PolyLineTextPath
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
@@ -139,12 +140,38 @@ def update_all_planes_map(planes_dict):
         color = get_plane_color(icao)
         
         # Historia-viiva
+        #if len(p["history"]) > 1:
+        #    folium.PolyLine(
+        #        locations=[p["history"][-2], (lat, lon)],
+        #        color=color,
+        #        weight=2,
+        #        opacity=0.6
+        #    ).add_to(m)
+
+        # Historia-viiva + suuntanuoli
         if len(p["history"]) > 1:
-            folium.PolyLine(
-                locations=[p["history"][-2], (lat, lon)],
+
+            prev_point = p["history"][-2]
+            current_point = (lat, lon)
+
+            line = folium.PolyLine(
+                locations=[prev_point, current_point],
                 color=color,
                 weight=2,
-                opacity=0.6
+                opacity=0.8
+            )
+
+            line.add_to(m)
+
+            PolyLineTextPath(
+                line,
+                "➜",
+                repeat=False,
+                offset=7,
+                attributes={
+                    "font-size": "16",
+                    "fill": color
+                }
             ).add_to(m)
 
         alt = p["state"][0]
