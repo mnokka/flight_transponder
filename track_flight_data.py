@@ -11,6 +11,8 @@ import signal
 import sys
 import tty
 import termios
+import threading
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 # --------------------- ASETUKSET ---------------------
 JSON_DIR = "./json_data"
@@ -45,8 +47,21 @@ OPERATORLEN=8
 FLIGHTLEN=6
 WIDTH=200
 
-    
-m = folium.Map(location=[61.0, 25.0], zoom_start=6)
+HTTP_PORT = 8777    # open in browser: http://localhost:8777/map.html
+#m = folium.Map(location=[61.0, 25.0], zoom_start=6)
+m = folium.Map(
+    location=[61.0, 25.0],
+    zoom_start=6,
+    tiles="OpenStreetMap",
+    control_scale=True
+)
+
+#OFFILINE USAGE
+#m = folium.Map(
+#    location=[61.0, 25.0],
+#    zoom_start=6,
+#    tiles=None
+#)
 
 plane_colors = {}
 COLOR_POOL = [
@@ -62,6 +77,7 @@ if os.path.exists(map_file):
 MAP_SAVE_INTERVAL = 200      
 last_map_save = 0
 
+
 dumplog = open(DUMP_LOG, "a")
 dumplog.write(f"*************** NEW LOG ENTRY ****************************************\n")
 dumplog.write(f"{datetime.now()}\n")
@@ -75,6 +91,7 @@ dfilename = f"Dashboard_{datetime.now().replace(microsecond=0)}"
 dfilename = dfilename.replace(":", "-").replace(" ", "_") + ".txt"
 dasboardf=open(dfilename, "w")
 last_save_time = "-"
+last_map_save_time = "-"
 
 
 
@@ -130,12 +147,15 @@ def update_all_planes_map(planes_dict):
                 opacity=0.6
             ).add_to(m)
 
+        alt = p["state"][0]
+        alt_text = "GROUND" if alt == "ground" else f"{int(alt)} ft"
         tooltip_text = (
             f"Flight: {p['flight']}\n"
             f"Reg: {p.get('registration','??')}\n"
             f"Operator: {p.get('operator','??')}\n"
             f"Type: {p.get('type','??')}\n"
-            f"Altitude: {p['state'][0]} ft\n"
+            f"Altitude: {alt_text}\n"
+            #f"Altitude: {p['state'][0]} ft\n"
             f"Speed: {p['state'][1]} kt\n"
             f"Track: {p['state'][2]}°\n"
             f"RSSI: {p['state'][5]}\n"
@@ -145,7 +165,7 @@ def update_all_planes_map(planes_dict):
 
         folium.CircleMarker(
             location=[lat, lon],
-            radius=4,
+            radius=2,
             color=color,
             fill=True,
             fill_color=color,
@@ -163,6 +183,19 @@ def update_all_planes_map(planes_dict):
         last_map_save = now_time
 
 # ---------------- UTILITIES ----------------
+
+def parse_alt(val):
+    if val == "ground":
+        return "ground"
+
+    if isinstance(val, str):
+        val = val.replace(".", "").replace(",", ".")
+
+    try:
+        return round(float(val), 0)
+    except (TypeError, ValueError):
+        return 0
+
 def beep():
     os.system("paplay /usr/share/sounds/freedesktop/stereo/complete.oga &")
 
@@ -201,16 +234,54 @@ def load_aircraft_database():
                 "model": row.get("model","??")
             }
 
+def start_http_server():
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), QuietHandler)
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    print(f"HTTP server running:")
+    print(f"http://localhost:{HTTP_PORT}/{map_file}")
+
+    debug(f"HTTP server started on port {HTTP_PORT}")
+
+    return server            
+
 # ---------------- HELPER ----------------
+# ---------------- HELPERS ----------------
+def safe_float(val, default=0.0):
+    if val == "ground":
+        return "ground"
+    if isinstance(val, str):
+        val = val.replace(".", "").replace(",", ".")
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+
 def extract_state(p):
+    alt_raw = p.get("altitude")
+    on_ground = p.get("on_ground")
+
+    if alt_raw == "ground" or on_ground is True:
+        alt = "ground"
+    else:
+        alt = safe_float(alt_raw)
+        alt = round(alt, 0)
+
     return (
-        #round(p.get("altitude") or 0,0),
-        round(float(p.get("altitude") or 0), 0),
-        round(p.get("speed") or 0,0),
-        round(p.get("track") or 0,0),
-        round(p.get("lat") or 0.0,5),
-        round(p.get("lon") or 0.0,5),
-        round(p.get("rssi") or 0.0,1)
+        alt,
+        round(safe_float(p.get("speed")), 0),
+        round(safe_float(p.get("track")), 0),
+        round(safe_float(p.get("lat")), 5),
+        round(safe_float(p.get("lon")), 5),
+        round(safe_float(p.get("rssi")), 1)
     )
 
 # ---------------- DUMP MANAGEMENT ----------------
@@ -322,7 +393,8 @@ def write_snapshot(planes_dict):
     else:
         for icao, p in planes_dict.items():
             s = p["state"]
-
+            
+            alt_display = "GND" if s[0] == "ground" else f"{int(s[0])}"
             dasboardf.write(
                 f"{icao:06X} "
                 f"{p['registration'][:6]:<6} "
@@ -330,7 +402,8 @@ def write_snapshot(planes_dict):
                 f"{p['operator'][:8]:<8} "
                 f"{p['flight'][:6]:<6} "
                 f"{s[3]:>9.5f} {s[4]:>9.5f} "
-                f"{s[0]:>6} {s[1]:>6} {s[2]:>6} "
+                f"{alt_display:>6} {s[1]:>6} {s[2]:>6} "
+                #f"{s[0]:>6} {s[1]:>6} {s[2]:>6} "
                 f"{s[5]:>6} "
                 f"{p['messages']:>5} "
                 f"{p['first_seen']:>8} "
@@ -350,11 +423,26 @@ def write_snapshot(planes_dict):
     dasboardf.flush()
 
 
+def save_map_snapshot():
+    global last_map_save_time
+
+    filename = f"map_{datetime.now().replace(microsecond=0)}"
+    filename = filename.replace(":", "-").replace(" ", "_") + ".html"
+
+    tmp = filename + ".tmp"
+    m.save(tmp)
+    os.replace(tmp, filename)
+
+    last_map_save_time = datetime.now().strftime("%H:%M:%S")
+
+    print(f"Map saved: {filename}")
+
 
 
 
 # ---------------- START ----------------
 print("Starting...")
+http_server = start_http_server()
 load_aircraft_database()
 start_dump(show_output=True)
 time.sleep(3)
@@ -365,7 +453,8 @@ def print_dashboard_header():
     print("="*WIDTH)
     print(f"DASHBOARD {datetime.now()}    Map:{map_file}   Debug:{DEBUG_FILE}   Dump:{DUMP_LOG}   Dashboard file:{dfilename}")
     print(f"Running: {format_runtime(time.time() - start_time)}")
-    print(f"Last reset: {last_reset_time}   Last saved (s): {last_save_time}")
+    #print(f"Last reset: {last_reset_time}   Last saved (s): {last_save_time}   (m save mapfile)")
+    print(f"Last reset: {last_reset_time}   Last saved (s): {last_save_time}   Map saved: {last_map_save_time}")
     print("="*WIDTH)
     print(
         f"{'ICAO':<6} {'Reg':<6} {'Type':<4} {'Op':<8} {'Flight':<6} "
@@ -479,6 +568,7 @@ try:
         else:
             for icao, p in planes_dict.items():
                 s = p["state"]
+                alt_display = "GND" if s[0] == "ground" else f"{int(s[0])}"
                 print(
                     f"{icao:06X} "
                     f"{p['registration'][:6]:<6} "
@@ -486,7 +576,8 @@ try:
                     f"{p['operator'][:8]:<8} "
                     f"{p['flight'][:6]:<6} "
                     f"{s[3]:>9.5f} {s[4]:>9.5f} "
-                    f"{s[0]:>6} {s[1]:>6} {s[2]:>6} "
+                    f"{alt_display:>6} {s[1]:>6} {s[2]:>6} "
+                    #f"{s[0]:>6} {s[1]:>6} {s[2]:>6} "
                     f"{s[5]:>6} "
                     f"{p['messages']:>5} "
                     f"{p['first_seen']:>8} "
@@ -511,6 +602,11 @@ try:
                 print("S painettu")
                 time.sleep(0.2)
                 write_snapshot(planes_dict)
+
+            elif key == "m":
+                print("M painettu")
+                time.sleep(0.2)
+                save_map_snapshot()    
         time.sleep(0.5)
 
 except KeyboardInterrupt:
